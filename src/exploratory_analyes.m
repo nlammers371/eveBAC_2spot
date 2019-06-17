@@ -17,6 +17,7 @@ for i = 1:numel(nucleus_struct)
     start_vec = NaN(2,1);
     stop_vec = NaN(2,1);
     gap_vec = NaN(2,1);
+    gap5_vec = NaN(2,1);
     for j = 1:2
         fv = fluo(j,:);
         if any(~isnan(fv)) 
@@ -24,11 +25,15 @@ for i = 1:numel(nucleus_struct)
             stop_i = find(~isnan(fv),1,'last');
             start_vec(j) = time(start_i);
             stop_vec(j) = time(stop_i);
-            gap =  max(diff(find(~isnan(fv(start_i:stop_i)))))*Tres;
-            if ~isempty(gap)
+            dur_filt = conv(~isnan(fv),ones(1,5),'same');
+            gap =  max(diff(find(dur_filt>0)))*Tres;
+            gap5 =  max(diff(find(dur_filt==5)))*Tres;
+            if ~isempty(gap) && ~isempty(gap5)
                 gap_vec(j) = gap;
+                gap5_vec(j) = gap5;
             else
                 gap_vec(j) = 0;
+                gap5_vec(j) = 0;
             end
         end
     end
@@ -37,7 +42,7 @@ for i = 1:numel(nucleus_struct)
     nucleus_struct(i).stop_time = stop_vec;
     nucleus_struct(i).early_stop = stop_vec <= 30*60;
     nucleus_struct(i).biggest_gap = gap_vec;
-    nucleus_struct(i).big_gap = gap_vec >= 15*60;
+    nucleus_struct(i).big_gap = gap_vec >= 15*60&gap5_vec >= 15*60;
     
     % calculate nucleus AP position
     nucleus_struct(i).apMean = nanmean(nucleus_struct(i).apPos);
@@ -59,6 +64,7 @@ end
 
 % number of active spots as a function of AP
 n_on_fig = figure;
+n_on_fig.Position = [100 100 1028 512];
 cm = brewermap(8,'Set1');
 colormap(cm)
 hold on
@@ -77,7 +83,7 @@ xlabel('% embryo length')
 ylabel('share') 
 xlim([15,60])
 saveas(n_on_fig,[figPath 'n_on_fig.png'])
-         
+%%         
 % calculate max times for each set
 set_vec = [nucleus_struct.setID];
 set_index = unique(set_vec);
@@ -129,11 +135,11 @@ for i = two_spot_indices
     r_vec(i) = Inf;
     r_vec(setID_vec~=setID|~ref_flag) = Inf;
     % find closest nucleus
-    [~, mi] = min(r_vec);
-    options = find(nucleus_struct(mi).inference_flag==1);
+    [~, mi_gap] = min(r_vec);
+    options = find(nucleus_struct(mi_gap).inference_flag==1);
     nn_ind = randsample(options,1);
-    nn_time_vec = nucleus_struct(mi).time_interp(1,:);
-    nn_fluo = nucleus_struct(mi).fluo_interp(nn_ind,:);
+    nn_time_vec = nucleus_struct(mi_gap).time_interp(1,:);
+    nn_fluo = nucleus_struct(mi_gap).fluo_interp(nn_ind,:);
     % calculate matrics
     nn_on_vec = [sister_on_vec(sister_id) nn_time_vec(find(~isnan(nn_fluo),1))];
     nn_off_vec = [sister_off_vec(sister_id) nn_time_vec(find(~isnan(nn_fluo),1,'last'))];
@@ -146,46 +152,98 @@ for i = two_spot_indices
 end   
 
 %%% on and off times
-% 
+t_axis = linspace(0,50);
 % concatenate results
 sister_on_array = vertcat(sister_struct.on_times);
 sister_off_array = vertcat(sister_struct.off_times);
 nn_on_array = vertcat(nn_struct.on_times);
 nn_off_array = vertcat(nn_struct.off_times);
+% linear fit
+nn_on_vec1 = nn_on_array(:,1)/60;
+nn_on_vec2 = nn_on_array(:,2)/60;
+p = polyfit(nn_on_vec1,nn_on_vec2,1);
+nn2_pd = polyval(p,t_axis);
 
-on_fig = figure;
+nn_on_fig = figure;
 hold on
-scatter(sister_on_array(:,1)/60,sister_on_array(:,2)/60,30,'o','MarkerFaceColor',cm(1,:),'MarkerFaceAlpha',.3,'MarkerEdgeAlpha',0)
-scatter(nn_on_array(:,1)/60,nn_on_array(:,2)/60,30,'o','MarkerFaceColor',cm(2,:),'MarkerFaceAlpha',.3,'MarkerEdgeAlpha',0)
-legend('sister spots','nearest neighbor spots','Location','northwest')
+scatter(nn_on_array(:,1)/60,nn_on_array(:,2)/60,30,'o','MarkerFaceColor',cm(2,:),'MarkerFaceAlpha',.5,'MarkerEdgeAlpha',0)
+plot(t_axis,nn2_pd,'Color','black')
+legend('nearest neighbor spots','linear fit','Location','northwest')
 xlabel('on time (spot 1)')
 ylabel('on time (spot 2)')
 grid on
 box on
 set(gca,'Fontsize',12)
-saveas(on_fig,[figPath 'sister_on_time_scatter.png'])
+saveas(nn_on_fig,[figPath 'nn_on_time_scatter.png'])
 
-off_fig = figure;
+% linear fit
+s_on_vec1 = sister_on_array(:,1)/60;
+s_on_vec2 = sister_on_array(:,2)/60;
+p = polyfit(s_on_vec1,s_on_vec2,1);
+s2_pd = polyval(p,t_axis);
+
+sister_on_fig = figure;
 hold on
-scatter(sister_off_array(:,1)/60,sister_off_array(:,2)/60,30,'o','MarkerFaceColor',cm(1,:),'MarkerFaceAlpha',.3,'MarkerEdgeAlpha',0)
-scatter(nn_off_array(:,1)/60,nn_off_array(:,2)/60,30,'o','MarkerFaceColor',cm(2,:),'MarkerFaceAlpha',.3,'MarkerEdgeAlpha',0)
-legend('sister spots','nearest neighbor spots','Location','northwest')
+scatter(s_on_vec1,s_on_vec2,30,'o','MarkerFaceColor',cm(1,:),'MarkerFaceAlpha',.5,'MarkerEdgeAlpha',0)
+plot(t_axis,s2_pd,'Color','black')
+legend('sister spots','linear fit','Location','northwest')
+xlabel('on time (spot 1)')
+ylabel('on time (spot 2)')
+grid on
+box on
+set(gca,'Fontsize',12)
+saveas(sister_on_fig,[figPath 'sister_on_time_scatter.png'])
+
+% linear fit
+nn_off_vec1 = nn_off_array(:,1)/60;
+nn_off_vec2 = nn_off_array(:,2)/60;
+nan_ft = ~isnan(nn_off_vec1)&~isnan(nn_off_vec2);
+p = polyfit(nn_off_vec1(nan_ft),nn_off_vec2(nan_ft),1);
+nn2_pd = polyval(p,t_axis);
+
+nn_off_fig = figure;
+hold on
+scatter(nn_off_array(:,1)/60,nn_off_array(:,2)/60,30,'o','MarkerFaceColor',cm(2,:),'MarkerFaceAlpha',.5,'MarkerEdgeAlpha',0)
+plot(t_axis,nn2_pd,'Color','black')
+legend('nearest neighbor spots','linear fit','Location','northwest')
 xlabel('off time (spot 1)')
 ylabel('off time (spot 2)')
 grid on
 box on
 set(gca,'Fontsize',12)
-saveas(off_fig,[figPath 'sister_off_time_scatter.png'])
+saveas(nn_off_fig,[figPath 'nn_off_time_scatter.png'])
+
+% linear fit
+s_off_vec1 = sister_off_array(:,1)/60;
+s_off_vec2 = sister_off_array(:,2)/60;
+nan_ft = ~isnan(s_off_vec1)&~isnan(s_off_vec2);
+p = polyfit(s_off_vec1(nan_ft),s_off_vec2(nan_ft),1);
+s2_pd = polyval(p,t_axis);
+
+sister_off_fig = figure;
+hold on
+scatter(s_off_vec1,s_off_vec2,30,'o','MarkerFaceColor',cm(1,:),'MarkerFaceAlpha',.5,'MarkerEdgeAlpha',0)
+plot(t_axis,s2_pd,'Color','black')
+legend('sister spots','linear fit','Location','northwest')
+xlabel('off time (spot 1)')
+ylabel('off time (spot 2)')
+grid on
+box on
+set(gca,'Fontsize',12)
+saveas(sister_off_fig,[figPath 'sister_off_time_scatter.png'])
+
 
 %%
-
 particle_id_vec = [nucleus_struct.ParticleID];
 particle_flag_vec = max(~isnan(particle_id_vec))>0;
 gap_flag_vec = [nucleus_struct.big_gap];
-[gap_flag_vec, mi] = max(gap_flag_vec);
+[gap_flag_vec, mi_gap] = max(gap_flag_vec);
+late_flag_vec = [nucleus_struct.late_start];
+[late_flag_vec, mi_late] = max(late_flag_vec);
 
-bkg_filter = ~gap_flag_vec & particle_flag_vec;
-gap_filter = gap_flag_vec & particle_flag_vec;
+bkg_filter = ~late_flag_vec&~gap_flag_vec & particle_flag_vec & nc14_flag;
+gap_filter = ~late_flag_vec & gap_flag_vec & particle_flag_vec & nc14_flag;
+late_filter = late_flag_vec & ~gap_flag_vec & particle_flag_vec & nc14_flag;
 
 
 % initialize and populate arrays to track single particle trajectories
@@ -195,11 +253,14 @@ bkg_fluo_array = NaN(200,sum(bkg_filter));
 gap_ap_array = NaN(200,sum(gap_filter));
 gap_time_array = NaN(200,sum(gap_filter));
 gap_fluo_array = NaN(200,sum(gap_filter));
+late_ap_array = NaN(200,sum(gap_filter));
+late_time_array = NaN(200,sum(gap_filter));
+late_fluo_array = NaN(200,sum(gap_filter));
 iter = 1;
 for i = find(bkg_filter)
-    fluo = nucleus_struct(i).fluo(mi(i),:);
-    time = nucleus_struct(i).time(mi(i),:);
-    ap = nucleus_struct(i).apPos(mi(i),:);
+    fluo = nucleus_struct(i).fluo(mi_gap(i),:);
+    time = nucleus_struct(i).time(mi_gap(i),:);
+    ap = nucleus_struct(i).apPos(mi_gap(i),:);
     bkg_ap_array(1:numel(ap),iter) = ap;
     bkg_time_array(1:numel(ap),iter) = time;
     bkg_fluo_array(1:numel(ap),iter) = fluo;
@@ -207,7 +268,7 @@ for i = find(bkg_filter)
 end
 iter = 1;
 for i = find(gap_filter)
-    fluo = nucleus_struct(i).fluo(mi(i),:);
+    fluo = nucleus_struct(i).fluo(mi_gap(i),:);
     time = nucleus_struct(i).time;%(mi(i),:);
     ap = nucleus_struct(i).apPos;%(mi(i),:);
     gap_ap_array(1:numel(ap),iter) = ap;
@@ -215,32 +276,96 @@ for i = find(gap_filter)
     gap_fluo_array(1:numel(ap),iter) = fluo;
     iter = iter + 1;
 end
+iter = 1;
+for i = find(late_filter)
+    fluo = nucleus_struct(i).fluo(mi_late(i),:);
+    time = nucleus_struct(i).time;%(mi(i),:);
+    ap = nucleus_struct(i).apPos;%(mi(i),:);
+    late_ap_array(1:numel(ap),iter) = ap;
+    late_time_array(1:numel(ap),iter) = time;
+    late_fluo_array(1:numel(ap),iter) = fluo;
+    iter = iter + 1;
+end
 
 
-cm1 = brewermap(128,'RdYlBu');
-switch_figure = figure;
-switch_figure.Position = [100 100 1028 512];
-colormap(cm1);
+close all
+cm1 = brewermap(11,'Spectral');
+
+base_figure = figure;
+base_figure.Position = [100 100 1028 512];
 hold on
 % background 
-plot(bkg_ap_array,bkg_time_array/60,'Color',[.5 .5 .5 .2])
+p1 = plot(bkg_ap_array,bkg_time_array/60,'Color',[.5 .5 .5 .1],'LineWidth',1.5);
 bkg_ap_array_spot = bkg_ap_array;
 bkg_ap_array_spot(isnan(bkg_fluo_array)) = NaN;
 bkg_time_array_spot = bkg_time_array;
 bkg_time_array_spot(isnan(bkg_fluo_array)) = NaN;
-plot(bkg_ap_array_spot,bkg_time_array_spot/60,'Color',[cm(2,:) .5])
+p2 = plot(bkg_ap_array_spot,bkg_time_array_spot/60,'Color',[cm1(end-1,:) .3],'LineWidth',1.5);
+set(gca, 'YDir','reverse')
+xlim([.25 .62]);
+ylim([5 50])
+grid on
+xlabel('% embryo length')
+ylabel('minutes into nc14')
+legend([p1(1) p2(1)],'nucleus tracks','active periods','Location','northwest')
+set(gca,'Fontsize',12)
+saveas(base_figure,[figPath 'base_trace_map.png'])
+
+gap_figure = figure;
+gap_figure.Position = [100 100 1028 512];
+hold on
+% background 
+scatter(bkg_ap_array(:),bkg_time_array(:)/60,10,'MarkerFaceColor',[.5 .5 .5],'MarkerFaceAlpha',.05,'MarkerEdgeAlpha',0);%,'LineWidth',1.5)
+bkg_ap_array_spot = bkg_ap_array;
+bkg_ap_array_spot(isnan(bkg_fluo_array)) = NaN;
+bkg_time_array_spot = bkg_time_array;
+bkg_time_array_spot(isnan(bkg_fluo_array)) = NaN;
+scatter(bkg_ap_array_spot(:),bkg_time_array_spot(:)/60,'MarkerFaceColor',[cm1(end-1,:)],'MarkerFaceAlpha',.05,'MarkerEdgeAlpha',0);%,'LineWidth',1.5)
 % gap traces
-plot(gap_ap_array,gap_time_array/60,'Color',[cm(4,:) .6],'LineWidth',1.5)
+p1 = plot(gap_ap_array,gap_time_array/60,'Color',[cm1(end,:) .4],'LineWidth',2);
 gap_ap_array_spot = gap_ap_array;
 gap_ap_array_spot(isnan(gap_fluo_array)) = NaN;
 gap_time_array_spot = gap_time_array;
 gap_time_array_spot(isnan(gap_fluo_array)) = NaN;
-plot(gap_ap_array_spot,gap_time_array_spot/60,'Color',[cm(3,:) .8],'LineWidth',1.5)
+p2 = plot(gap_ap_array_spot,gap_time_array_spot/60,'Color',[cm1(4,:) 1],'LineWidth',2);
+% set axis characteristics
 set(gca, 'YDir','reverse')
 xlim([.25 .62]);
-ylim([0 50])
-% scatter(sp_ap_vec_gap,time_vec_gap,10,'MarkerFaceColor',cm(4,:),'MarkerEdgeAlpha',0,'MarkerFaceAlpha',.1)
-% scatter(sp_ap_vec_gap(fluo_flag_vec_gap),time_vec_gap(fluo_flag_vec_gap),10,'MarkerFaceColor',cm(3,:),'MarkerEdgeAlpha',0,'MarkerFaceAlpha',.2)
+ylim([5 50])
+grid on
+xlabel('% embryo length')
+ylabel('minutes into nc14')
+legend([p1(1) p2(1)],'nucleus tracks','active periods (gap nuclei)','Location','northwest')
+set(gca,'Fontsize',12)
+saveas(gap_figure,[figPath 'gap_trace_map.png'])
+
+late_figure = figure;
+late_figure.Position = [100 100 1028 512];
+hold on
+% background 
+scatter(bkg_ap_array(:),bkg_time_array(:)/60,10,'MarkerFaceColor',[.5 .5 .5],'MarkerFaceAlpha',.05,'MarkerEdgeAlpha',0);%,'LineWidth',1.5)
+bkg_ap_array_spot = bkg_ap_array;
+bkg_ap_array_spot(isnan(bkg_fluo_array)) = NaN;
+bkg_time_array_spot = bkg_time_array;
+bkg_time_array_spot(isnan(bkg_fluo_array)) = NaN;
+scatter(bkg_ap_array_spot(:),bkg_time_array_spot(:)/60,'MarkerFaceColor',[cm1(end-1,:)],'MarkerFaceAlpha',.05,'MarkerEdgeAlpha',0);%,'LineWidth',1.5)
+% gap traces
+p1 = plot(late_ap_array,late_time_array/60,'Color',[cm1(end,:) .4],'LineWidth',2);
+late_ap_array_spot = late_ap_array;
+late_ap_array_spot(isnan(late_fluo_array)) = NaN;
+late_time_array_spot = late_time_array;
+late_time_array_spot(isnan(late_fluo_array)) = NaN;
+p2 = plot(late_ap_array_spot,late_time_array_spot/60,'Color',[cm1(1,:) 1],'LineWidth',2);
+% set axis characteristics
+set(gca, 'YDir','reverse')
+xlim([.25 .62]);
+ylim([5 50])
+grid on
+xlabel('% embryo length')
+ylabel('minutes into nc14')
+legend([p1(1) p2(1)],'nucleus tracks','active periods (late nuclei)','Location','northwest')
+set(gca,'Fontsize',12)
+saveas(late_figure,[figPath 'late_trace_map.png'])
 
 %% mean fluorescence
 sister_mf_array = vertcat(sister_struct.mean_fluo);
